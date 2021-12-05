@@ -40,9 +40,6 @@ if __name__=='__main__':
     rddA = weekly_pattern.map(lambda x: next(csv.reader([x]))) \
                          .map(lambda x: (x[1], x[12], x[13], x[16]))
     
-    # Transform rddA to keep any record that reported on or after March 17, i.e. as long as the date_range_end is later than March 17.
-    rddB = rddA.filter(lambda x: (x[1] > "2020-03-16T00:00:00-00:00" and x[2] > "2020-03-17T00:00:00-00:00"))
-    
     # Make use of the getVisits() function above, we can gather all the the visits for each restaurant from rddB.
     rddD = rddB.map(getVisits)
     
