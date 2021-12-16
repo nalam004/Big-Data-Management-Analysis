@@ -1,67 +1,70 @@
-import csv
-import datetime
-import json
-import pyspark
+from pyspark import SparkContext
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import DateType, IntegerType, MapType, StringType
-from datetime import datetime as dt, timedelta as td
+from pyspark.sql import types as T
+import datetime
+import numpy as np
+import sys
 import ast
-import pyspark.sql.functions as func 
+
+def main(sc, spark):
+    dfPlaces = spark.read.csv('/data/share/bdm/core-places-nyc.csv', header=True, escape='"')
+    dfPattern = spark.read.csv('/data/share/bdm/weekly-patterns-nyc-2019-2020/*', header=True, escape='"')
+    OUTPUT_PREFIX = sys.argv[1]
+
+    CAT_CODES = {'445210', '722515', '445299', '445120', '452210', '311811', '722410', '722511', '445220', '445292', '445110', '445291', '445230', 
+                 '446191', '446110', '722513', '452311'}
+    CAT_GROUP = {'452311': 0, '452210': 0, '445120': 1, '722410': 2, '722511': 3, '722513': 4, '446191': 5, '446110': 5, '722515': 6, '311811': 6, 
+                 '445299': 7, '445220': 7, '445292': 7, '445291': 7, '445230': 7, '445210': 7, '445110': 8}
+
+    dfD = dfPlaces.filter(F.col('naics_code').isin(CAT_CODES)).select('placekey', 'naics_code')
+    udfToGroup = F.udf(CAT_GROUP.get, T.IntegerType())
+    dfE = dfD.withColumn('group', udfToGroup('naics_code'))
+
+    dfF = dfE.drop('naics_code').cache()
+    groupCount = dict(dfF.groupBy('group').count().collect())
+
+    def expandVisits(date_range_start, visits_by_day):
+      dic = []
+      lis = ast.literal_eval(visits_by_day)
+      start = datetime.datetime.strptime(date_range_start.split('T')[0],'%Y-%m-%d')
+      end = start + datetime.timedelta(days=len(lis))
+      delta = end - start
+
+      for i in range(delta.days):
+        if (lis[i]==0): continue
+        dt = start + datetime.timedelta(days=i)
+        if dt.year in (2019, 2020):
+          dic.append((dt.year, f'{dt.month:02d}-{dt.day:02d}', lis[i]))
+      return dic
+
+    def computeStats(group, visits):
+      vis = np.fromiter(visits, int)
+      vis.resize(groupCount[group])
+      med = np.median(vis)
+      stdev = np.std(vis)
+      return(int(med + 0.5), max(0, int(med - stdev + 0.5)), int(med + stdev + 0.5))
+
+    visitType = T.StructType([T.StructField('year', T.IntegerType()), T.StructField('date', T.StringType()), T.StructField('visits', T.IntegerType())])
+    statsType = T.StructType([T.StructField('median', T.IntegerType()), T.StructField('low', T.IntegerType()), T.StructField('high', T.IntegerType())])
+    
+    udfExpand = F.udf(expandVisits, T.ArrayType(visitType))
+    udfComputeStats = F.udf(computeStats, statsType)
+
+    dfH = dfPattern.join(dfF, 'placekey').withColumn('expanded', F.explode(udfExpand('date_range_start', 'visits_by_day'))).select('group', 'expanded.*')
+
+    dfI = dfH.groupBy('group', 'year', 'date').agg(F.collect_list('visits').alias('visits')).withColumn('stats', udfComputeStats('group', 'visits'))
+
+    dfJ = dfI.select('group', 'year', 'date', 'stats.*').orderBy('group', 'year', 'date').withColumn('date', F.concat(F.lit('2020-'), F.col('date'))).cache()
+
+    filename = ['big_box_grocers', 'convenience_stores', 'drinking_places', 'full_service_restaurants',
+                'limited_service_restaurants', 'pharmacies_and_drug_stores', 'snack_and_retail_bakeries',
+                'specialty_food_stores', 'supermarkets_except_convenience_stores']
+
+    for i in filename:
+      dfJ.filter(F.col('group')==i).drop('group').coalesce(1).write.csv(f'{OUTPUT_PREFIX}/{i}', mode='overwrite', header=True)
 
 if __name__=='__main__':
-    sc = pyspark.SparkContext()
+    sc = SparkContext()
     spark = SparkSession(sc)
-    
-    # returns number of visits for the day
-    def expandVisits(date_range_start, visits_by_day):
-        dic = {}
-        lis = ast.literal_eval(visits_by_day)
-        start = date_range_start.split('T')[0]
-        sd = dt.strptime(start,'%Y-%m-%d')
-        end = sd + datetime.timedelta(days=len(lis))
-
-        delta = end - sd
-        for i in range(delta.days):
-            dic[(sd + td(days = i)).date()] = lis[i]
-            
-        return (dic)
-    
-    # code for each store type
-    NAICS = set(['452210', '452311', '445120', '722410', '722511', '722513', '446110', '446191', '311811', '722515', '445210', '445220', '445230', '445291', '445292', '445299', '445110']) 
-
-    # file for only items with one of the 9 store type
-    core_places = spark.read.csv('core-places-nyc.csv', header=True, escape='"').where(F.col('naics_code').isin(NAICS))
-    weekly_patterns = spark.read.csv('weekly-patterns-nyc-2019-2020', header=True, escape='"')
-    
-    big_box_grocers = core_places.where(F.col('naics_code').isin(set(['452210'])))
-    convenience_stores = core_places.where(F.col('naics_code').isin(set(['445120']))) 
-    drinking_places = core_places.where(F.col('naics_code').isin(set(['722410']))) 
-    full_service_restaurants = core_places.where(F.col('naics_code').isin(set(['722511']))) 
-    limited_service_restaurants = core_places.where(F.col('naics_code').isin(set(['722513']))) 
-    pharmacies_drug_stores = core_places.where(F.col('naics_code').isin(set(['446110', '446191'])))
-    snack_bakeries = core_places.where(F.col('naics_code').isin(set(['311811', '722515'])))
-    specialty_food_stores = core_places.where(F.col('naics_code').isin(set(['445210', '445220', '445230', '445291', '445292', '445299'])))
-    supermarkets = core_places.where(F.col('naics_code').isin(set(['445110'])))
-
-    # joins the core_places with weekly_patterns data
-    joined = core_places.join(weekly_patterns, core_places.safegraph_place_id == weekly_patterns.safegraph_place_id, "inner")
-    
-    # shows only code, date_start, and visits by day
-    df = joined.select(core_places.safegraph_place_id, 'naics_code', 'date_range_start', 'visits_by_day')
-    
-    # maps data to expandVisits function
-    udfExpand = F.udf(expandVisits, MapType(DateType(), IntegerType()))
-    dfB = df.select('naics_code', F.explode(udfExpand('date_range_start', 'visits_by_day')).alias('date', 'visits'))
-    
-    # find median and high
-    median = dfB.groupBy('naics_code', 'date').agg(func.percentile_approx('visits', 0.5).alias("median"))
-    high = dfB.groupBy('naics_code', 'date').agg(func.max('visits').alias('high'))
-
-    # joins median and high data
-    dfC = median.join(high, median.naics_code == high.naics_code)
-    dfD = dfC.select(median.date, 'median', 'high')
- 
-    
-    
-    #.saveAsTextFile('output')
+    main(sc, spark)
