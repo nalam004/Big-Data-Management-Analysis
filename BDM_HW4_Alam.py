@@ -59,7 +59,7 @@ def main(sc, spark):
     dfJ = dfI.select('group', 'year', 'date', 'stats.*').orderBy('group', 'year', 'date').withColumn('date', F.concat(F.lit('2020-'), F.col('date'))).cache()
 
     filename = ['big_box_grocers', 'convenience_stores', 'drinking_places', 'full_service_restaurants',
-                'limited_service_restaurants', 'pharmacies_and_drug_stores', 'snack_and_retail_bakeries',
+                'limited_service_restaurants', 'pharmacies_and_drug_stores', 'snack_and_bakeries',
                 'specialty_food_stores', 'supermarkets_except_convenience_stores']
 
     for i in range(len(filename)):
