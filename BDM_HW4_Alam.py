@@ -63,7 +63,7 @@ def main(sc, spark):
                 'specialty_food_stores', 'supermarkets_except_convenience_stores']
 
     for i in range(len(filename)):
-        dfJ.filter(F.col('group')==i).drop('group').coalesce(1).write.csv(f'{OUTPUT_PREFIX}/{filename[i]}', mode='overwrite', header=True)
+        dfJ.filter(F.col('group')==i).drop('group').coalesce(1).write.csv('{}/{}'.format(OUTPUT_PREFIX, filename[i]), mode='overwrite', header=True)
 
 if __name__=='__main__':
     sc = SparkContext()
