@@ -25,25 +25,26 @@ def main(sc, spark):
     groupCount = dict(dfF.groupBy('group').count().collect())
 
     def expandVisits(date_range_start, visits_by_day):
-      dic = []
-      lis = ast.literal_eval(visits_by_day)
-      start = datetime.datetime.strptime(date_range_start.split('T')[0],'%Y-%m-%d')
-      end = start + datetime.timedelta(days=len(lis))
-      delta = end - start
+        dic = []
+        lis = ast.literal_eval(visits_by_day)
+        start = datetime.datetime.strptime(date_range_start.split('T')[0],'%Y-%m-%d')
+        end = start + datetime.timedelta(days=len(lis))
+        delta = end - start
 
-      for i in range(delta.days):
-        if (lis[i]==0): continue
-        dt = start + datetime.timedelta(days=i)
-        if dt.year in (2019, 2020):
-          dic.append((dt.year, f'{dt.month:02d}-{dt.day:02d}', lis[i]))
-      return dic
+        for i in range(delta.days):
+            if (lis[i]==0): continue
+            dt = start + datetime.timedelta(days=i)
+            if dt.year in (2019, 2020):
+                dic.append((dt.year, f'{dt.month:02d}-{dt.day:02d}', lis[i]))
+        
+        return dic
 
     def computeStats(group, visits):
-      vis = np.fromiter(visits, int)
-      vis.resize(groupCount[group])
-      med = np.median(vis)
-      stdev = np.std(vis)
-      return(int(med + 0.5), max(0, int(med - stdev + 0.5)), int(med + stdev + 0.5))
+        vis = np.fromiter(visits, int)
+        vis.resize(groupCount[group])
+        med = np.median(vis)
+        stdev = np.std(vis)
+        return(int(med + 0.5), max(0, int(med - stdev + 0.5)), int(med + stdev + 0.5))
 
     visitType = T.StructType([T.StructField('year', T.IntegerType()), T.StructField('date', T.StringType()), T.StructField('visits', T.IntegerType())])
     statsType = T.StructType([T.StructField('median', T.IntegerType()), T.StructField('low', T.IntegerType()), T.StructField('high', T.IntegerType())])
