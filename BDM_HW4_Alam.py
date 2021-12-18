@@ -35,7 +35,7 @@ def main(sc, spark):
             if (lis[i]==0): continue
             dt = start + datetime.timedelta(days=i)
             if dt.year in (2019, 2020):
-                dic.append((dt.year, f'{dt.month:02d}-{dt.day:02d}', lis[i]))
+                dic.append((dt.year, dt.strftime('%m-%d'), lis[i]))
         
         return dic
 
